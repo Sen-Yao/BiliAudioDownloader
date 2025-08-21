@@ -54,7 +54,9 @@ app.include_router(tasks_router, prefix="/api/v1")
 
 # 自动添加MCP路由（始终启用）
 from app.mcp_routes import router as mcp_router
+from app.mcp_sse import router as mcp_sse_router
 app.include_router(mcp_router, prefix="/mcp")
+app.include_router(mcp_sse_router, prefix="/mcp")
 
 
 @app.get("/", summary="根路径")

@@ -59,7 +59,7 @@ curl "http://localhost:8000/api/v1/tasks/{task_id}"
 curl "http://localhost:8000/api/v1/tasks/{task_id}/segments"
 ```
 
-### MCP协议
+### MCP协议（REST）
 ```bash
 # 列出工具
 curl "http://localhost:8000/mcp/tools"
@@ -71,6 +71,28 @@ curl -X POST "http://localhost:8000/mcp/tools/call" \
     "name": "create_audio_segmentation_task",
     "arguments": {"bv_number": "BV1b1bHzAEdG"}
   }'
+```
+
+### MCP协议（Streamable HTTP / SSE）
+- 服务已提供基于 SSE 的双通道端点：
+  - 下行（服务器->客户端，SSE）: `GET http://localhost:8000/mcp/sse`
+  - 上行（客户端->服务器，POST）: `POST http://localhost:8000/mcp/messages?session_id=<id>`
+
+- 客户端配置示例：
+  - transport: `sse`
+  - url: `http://localhost:8000/mcp/sse`
+  - headers: 可选（鉴权等）
+
+使用方式（低层示例）：
+```bash
+# 1) 连接 SSE，读取首个 event: endpoint，获取带 session_id 的上行URL
+curl -N http://localhost:8000/mcp/sse
+
+# 2) 向上行URL POST JSON-RPC 消息（以 listTools 为例）
+# 假设上一步拿到的上行地址是 /mcp/messages?session_id=XXXX
+curl -X POST "http://localhost:8000/mcp/messages?session_id=XXXX" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ## 🔧 环境变量
