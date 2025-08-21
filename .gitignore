@@ -162,17 +162,17 @@ cython_debug/
 .vscode/
 .vscode
 
-# Temp Folder
-bilibili_video
-bilibili_video/
-
-# Temp folder
-audio
-audio/
-
-# Temp folder
-outputs
-outputs/
+# 临时文件和测试数据
+temp/
+data/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
 
 # Executable files
 *.exe
