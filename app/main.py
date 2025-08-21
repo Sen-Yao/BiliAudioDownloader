@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="B站视频转文字API服务 (支持HTTP API和MCP协议)",
+    description="BiliAudioDownloader - B站视频音频切分服务 (支持HTTP API和MCP协议)",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -61,7 +61,7 @@ app.include_router(mcp_router, prefix="/mcp")
 async def root():
     """API根路径"""
     return {
-        "message": "B站视频转文字API服务",
+        "message": "BiliAudioDownloader - B站视频音频切分服务",
         "version": settings.app_version,
         "docs": "/docs",
         "health": "/health",

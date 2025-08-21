@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """应用配置"""
     
     # 应用基础配置
-    app_name: str = "B站视频转文字API"
+    app_name: str = "BiliAudioDownloader"
     app_version: str = "1.0.0"
     debug: bool = False
     

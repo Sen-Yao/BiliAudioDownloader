@@ -1,4 +1,4 @@
-# B站视频音频切分服务
+# BiliAudioDownloader
 
 基于FastAPI的B站视频下载和音频切分服务，支持HTTP API和MCP协议。
 
@@ -23,15 +23,15 @@
 ### 2. 部署服务
 ```bash
 # 构建镜像
-docker build -t bili2text .
+docker build -t bili-audio-downloader .
 
 # 运行容器（使用环境变量配置cookies）
 docker run -d \
-    --name bili2text \
+    --name bili-audio-downloader \
     --restart unless-stopped \
     -p 8000:8000 \
     -e BILI2TEXT_BILIBILI_COOKIES="SESSDATA=your_sessdata;bili_jct=your_bili_jct;DedeUserID=your_dedeuserid" \
-    bili2text
+    bili-audio-downloader
 ```
 
 ### 3. 验证部署
@@ -85,7 +85,7 @@ curl -X POST "http://localhost:8000/mcp/tools/call" \
 ## 📁 项目结构
 
 ```
-bili2text/
+BiliAudioDownloader/
 ├── app/                    # 应用代码
 │   ├── main.py            # FastAPI应用入口
 │   ├── tasks.py           # 任务处理

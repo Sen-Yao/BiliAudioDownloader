@@ -3,16 +3,17 @@
 # 用于下载B站视频并切分为30秒音频片段
 
 # 多阶段构建 - 构建阶段
-FROM python:3.10-slim as builder
+FROM python:3.10-alpine as builder
 
 # 设置工作目录
 WORKDIR /app
 
 # 安装构建依赖
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+    musl-dev \
+    libffi-dev \
+    && rm -rf /var/cache/apk/*
 
 # 复制依赖文件
 COPY requirements.txt .
@@ -23,26 +24,25 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 生产阶段
-FROM python:3.10-slim
+# 生产阶段 - 使用Alpine基础镜像
+FROM python:3.10-alpine
 
 # 添加元数据标签
-LABEL maintainer="Bili2Text Team"
-LABEL description="B站视频音频切分服务 - 支持HTTP API和MCP协议"
+LABEL maintainer="BiliAudioDownloader Team"
+LABEL description="BiliAudioDownloader - B站视频音频切分服务"
 LABEL version="1.0.0"
-LABEL org.opencontainers.image.source="https://github.com/your-repo/bili2text"
 
 # 创建非root用户
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN addgroup -g 1000 appuser && \
+    adduser -D -s /bin/sh -u 1000 -G appuser appuser
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装运行时依赖
-RUN apt-get update && apt-get install -y \
+# 安装运行时依赖（使用Alpine包管理器）
+RUN apk add --no-cache \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/cache/apk/*
 
 # 从构建阶段复制虚拟环境
 COPY --from=builder /opt/venv /opt/venv

@@ -1,0 +1,43 @@
+# Git相关
+.git
+.gitignore
+
+# Python缓存
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+temp/
+*.tmp
+*.log
+
+# 文档
+README.md
+*.md
+docs/
+
+# 测试文件
+tests/
+test_*
+*_test.py
+
+# 其他
+.env
+.env.local
+Dockerfile*
+.dockerignore
