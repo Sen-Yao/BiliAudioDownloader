@@ -2,8 +2,10 @@ from typing import List
 import asyncio
 import uuid
 import json
+import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import StreamingResponse
 
 import mcp.server as mcp_server
 import mcp.types as types
@@ -23,6 +25,28 @@ sse_transport = SseServerTransport("/mcp/messages")
 # MCP Server 实例
 server = mcp_server.Server("BiliAudioDownloader")
 
+# 服务器信息
+SERVER_INFO = {
+    "name": "BiliAudioDownloader",
+    "version": "1.0.0",
+    "description": "B站视频音频切分服务 - 支持MCP协议",
+    "capabilities": {
+        "tools": {},
+        "resources": {},
+        "prompts": {}
+    }
+}
+
+# 会话存储
+sessions = {}
+
+def generate_session_id():
+    """生成会话ID"""
+    return str(uuid.uuid4())
+
+def create_mcp_message(event_type: str, data: dict) -> str:
+    """创建MCP消息格式"""
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 @server.list_tools()
 async def list_tools() -> List[types.Tool]:
@@ -231,20 +255,311 @@ async def read_resource(uri: AnyUrl) -> str:
 
 @router.get("/sse")
 async def handle_sse(request: Request):
-    async with sse_transport.connect_sse(
-        request.scope, request.receive, request._send
-    ) as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
-
+    """改进的MCP/SSE端点，符合MCP协议规范"""
+    
+    async def generate_sse():
+        session_id = generate_session_id()
+        sessions[session_id] = {
+            "created_at": time.time(),
+            "last_activity": time.time()
+        }
+        
+        # 发送初始化消息
+        init_message = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": SERVER_INFO["capabilities"],
+                "clientInfo": {
+                    "name": "MCP Client",
+                    "version": "1.0.0"
+                },
+                "serverInfo": SERVER_INFO
+            }
+        }
+        
+        yield create_mcp_message("message", init_message)
+        
+        # 发送初始化响应
+        init_response = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": SERVER_INFO["capabilities"],
+                "serverInfo": SERVER_INFO
+            }
+        }
+        
+        yield create_mcp_message("message", init_response)
+        
+        # 发送端点信息
+        endpoint_data = {
+            "endpoint": f"/mcp/messages?session_id={session_id}"
+        }
+        yield create_mcp_message("endpoint", endpoint_data)
+        
+        # 发送ping消息保持连接
+        while True:
+            try:
+                await asyncio.sleep(15)  # 每15秒发送一次ping
+                ping_data = {
+                    "timestamp": time.time(),
+                    "session_id": session_id
+                }
+                yield create_mcp_message("ping", ping_data)
+                
+                # 更新会话活动时间
+                if session_id in sessions:
+                    sessions[session_id]["last_activity"] = time.time()
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                error_data = {
+                    "error": {
+                        "code": -32603,
+                        "message": "Internal error",
+                        "data": str(e)
+                    }
+                }
+                yield create_mcp_message("error", error_data)
+                break
+    
+    return StreamingResponse(
+        generate_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "X-Accel-Buffering": "no"  # 禁用nginx缓冲
+        }
+    )
 
 @router.post("/messages")
 async def handle_messages(request: Request):
-    await sse_transport.handle_post_message(
-        request.scope, request.receive, request._send
+    """处理MCP消息"""
+    try:
+        body = await request.json()
+        
+        # 验证JSON-RPC格式
+        if not isinstance(body, dict) or "jsonrpc" not in body:
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": body.get("id") if isinstance(body, dict) else None,
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request"
+                    }
+                }),
+                media_type="application/json"
+            )
+        
+        # 处理不同的方法
+        method = body.get("method")
+        params = body.get("params", {})
+        request_id = body.get("id")
+        
+        if method == "tools/list":
+            tools = await list_tools()
+            tools_data = [tool.model_dump() for tool in tools]
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "tools": tools_data
+                    }
+                }),
+                media_type="application/json"
+            )
+        
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+            
+            if not tool_name:
+                return Response(
+                    content=json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32602,
+                            "message": "Invalid params: missing tool name"
+                        }
+                    }),
+                    media_type="application/json"
+                )
+            
+            # 调用工具
+            result = await call_tool(tool_name, arguments)
+            content_data = [content.model_dump() for content in result]
+            
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": content_data
+                    }
+                }),
+                media_type="application/json"
+            )
+        
+        elif method == "resources/list":
+            resources = await list_resources()
+            resources_data = [resource.model_dump() for resource in resources]
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "resources": resources_data
+                    }
+                }),
+                media_type="application/json"
+            )
+        
+        elif method == "resources/read":
+            uri = params.get("uri")
+            if not uri:
+                return Response(
+                    content=json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32602,
+                            "message": "Invalid params: missing uri"
+                        }
+                    }),
+                    media_type="application/json"
+                )
+            
+            content = await read_resource(AnyUrl(uri))
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "contents": [{
+                            "type": "text",
+                            "text": content
+                        }]
+                    }
+                }),
+                media_type="application/json"
+            )
+        
+        else:
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {method}"
+                    }
+                }),
+                media_type="application/json"
+            )
+    
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error"
+                }
+            }),
+            media_type="application/json"
+        )
+    except Exception as e:
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": body.get("id") if isinstance(body, dict) else None,
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": str(e)
+                }
+            }),
+            media_type="application/json"
+        )
+
+@router.options("/sse")
+async def handle_sse_options():
+    """处理SSE的OPTIONS请求"""
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Cache-Control",
+            "Access-Control-Max-Age": "86400"
+        }
     )
+
+@router.options("/messages")
+async def handle_messages_options():
+    """处理消息的OPTIONS请求"""
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
+
+@router.get("/")
+async def mcp_root():
+    """MCP服务器根端点 - 提供服务器信息"""
+    return {
+        "name": SERVER_INFO["name"],
+        "version": SERVER_INFO["version"],
+        "description": SERVER_INFO["description"],
+        "protocol": "mcp",
+        "endpoints": {
+            "sse": "/mcp/sse",
+            "messages": "/mcp/messages",
+            "health": "/mcp/health"
+        },
+        "capabilities": SERVER_INFO["capabilities"]
+    }
+
+@router.get("/health")
+async def mcp_health():
+    """MCP服务器健康检查"""
+    return {
+        "status": "healthy",
+        "server": SERVER_INFO["name"],
+        "version": SERVER_INFO["version"],
+        "timestamp": time.time(),
+        "active_sessions": len(sessions)
+    }
+
+@router.get("/discover")
+async def mcp_discover():
+    """MCP服务器发现端点 - 用于LangFlow等应用发现MCP服务器"""
+    return {
+        "servers": [
+            {
+                "name": SERVER_INFO["name"],
+                "version": SERVER_INFO["version"],
+                "description": SERVER_INFO["description"],
+                "transport": "sse",
+                "endpoint": "/mcp/sse",
+                "capabilities": SERVER_INFO["capabilities"]
+            }
+        ]
+    }
 
 

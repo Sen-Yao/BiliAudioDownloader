@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     
     # 文件存储配置
     temp_dir: str = "./temp"
+    upload_dir: str = "./data/uploads"
+    output_dir: str = "./data/outputs"
     
     # 处理配置
     max_file_size: int = 500 * 1024 * 1024  # 500MB
