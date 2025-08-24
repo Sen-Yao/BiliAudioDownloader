@@ -295,11 +295,9 @@ async def handle_sse(request: Request):
         
         yield create_mcp_message("message", init_response)
         
-        # 发送端点信息
-        endpoint_data = {
-            "endpoint": f"/mcp/messages?session_id={session_id}"
-        }
-        yield create_mcp_message("endpoint", endpoint_data)
+        # 发送端点信息 - 直接发送URL字符串，而不是JSON对象
+        endpoint_url = f"/mcp/messages?session_id={session_id}"
+        yield f"event: endpoint\ndata: {endpoint_url}\n\n"
         
         # 发送ping消息保持连接
         while True:
@@ -343,6 +341,31 @@ async def handle_sse(request: Request):
 
 @router.post("/messages")
 async def handle_messages(request: Request):
+    """处理MCP消息"""
+    return await _handle_messages(request)
+
+@router.post("/{path:path}")
+async def handle_messages_fallback(request: Request, path: str):
+    """处理n8n可能发送的错误URL格式"""
+    # 如果路径包含特殊字符（可能是n8n发送的错误格式），直接处理请求
+    if "%7B" in path or "{" in path or "endpoint" in path:
+        return await _handle_messages(request)
+    
+    # 如果不是我们期望的格式，返回404
+    return Response(
+        content=json.dumps({
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32601,
+                "message": f"Method not found: {path}"
+            }
+        }),
+        media_type="application/json",
+        status_code=404
+    )
+
+async def _handle_messages(request: Request):
     """处理MCP消息"""
     try:
         body = await request.json()
